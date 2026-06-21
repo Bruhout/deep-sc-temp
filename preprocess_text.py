@@ -22,10 +22,10 @@ import json
 from tqdm import tqdm
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--input-data-dir', default='txt/en', type=str)
-parser.add_argument('--output-train-dir', default='txt/train_data.pkl', type=str)
-parser.add_argument('--output-test-dir', default='txt/test_data.pkl', type=str)
-parser.add_argument('--output-vocab', default='txt/vocab.json', type=str)
+parser.add_argument('--input-data-dir', default='txt-bookcorpus', type=str)
+parser.add_argument('--output-train-dir', default='txt-bookcorpus/train_data.pkl', type=str)
+parser.add_argument('--output-test-dir', default='txt-bookcorpus/test_data.pkl', type=str)
+parser.add_argument('--output-vocab', default='txt-bookcorpus/vocab.json', type=str)
 
 SPECIAL_TOKENS = {
   '<PAD>': 0,
