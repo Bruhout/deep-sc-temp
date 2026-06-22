@@ -17,7 +17,6 @@ from tqdm import tqdm
 from w3lib.html import remove_tags
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--data-dir', default='txt/train_data.pkl', type=str)
 parser.add_argument('--vocab-file', default='txt/vocab.json', type=str)
 parser.add_argument('--checkpoint-path', default='checkpoints/deepsc-Rayleigh', type=str)
 parser.add_argument('--channel', default='Rayleigh', type=str)
@@ -33,11 +32,11 @@ parser.add_argument('--bert-config-path', default='bert/cased_L-12_H-768_A-12/be
 parser.add_argument('--bert-checkpoint-path', default='bert/cased_L-12_H-768_A-12/bert_model.ckpt', type=str)
 parser.add_argument('--bert-dict-path', default='bert/cased_L-12_H-768_A-12/vocab.txt', type=str)
 
-device = torch.device("cpu")
+device = torch.device("cuda")
 
 # ── 10 hardcoded test sentences ───────────────────────────────────────────────
 DEMO_SENTENCES = [
-    "the cat sat on the mat",
+    "obviously what took place in the council afterwards is slightly different and that sets out more guidelines and the way forward that we want to see happening",
     "a quick brown fox jumps over the lazy dog",
     "she sells sea shells by the sea shore",
     "how much wood would a woodchuck chuck",
@@ -66,7 +65,7 @@ def sentences_to_tensor(sentences, token_to_idx, max_length, pad_idx, start_idx,
 
 
 def performance(args, SNR, net):
-    bleu_score_1gram = BleuScore(0, 0, 0, 1)
+    bleu_score_1gram = BleuScore(1, 0, 0, 0)
 
     StoT = SeqtoText(token_to_idx, end_idx)
 
@@ -137,16 +136,7 @@ if __name__ == '__main__':
                     num_vocab, num_vocab, args.d_model, args.num_heads,
                     args.dff, 0.1).to(device)
 
-    model_paths = []
-    for fn in os.listdir(args.checkpoint_path):
-        if not fn.endswith('.pth'):
-            continue
-        idx = int(os.path.splitext(fn)[0].split('_')[-1])
-        model_paths.append((os.path.join(args.checkpoint_path, fn), idx))
-
-    model_paths.sort(key=lambda x: x[1])
-    model_path, _ = model_paths[-1]
-    checkpoint = torch.load(model_path , map_location=torch.device('cpu'))
+    checkpoint = torch.load("" , map_location=torch.device('cuda'))
     deepsc.load_state_dict(checkpoint)
     print('model load!')
 
