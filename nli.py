@@ -1,14 +1,6 @@
-# !usr/bin/env python
-# -*- coding:utf-8 _*-
-"""
-@Author: Huiqiang Xie
-@File: performance.py
-@Time: 2021/4/1 11:48
-"""
 import os
 import json
 import torch
-import argparse
 import numpy as np
 from dataset import EurDataset, collate_data
 from models.transceiver import DeepSC
@@ -20,62 +12,68 @@ from w3lib.html import remove_tags
 
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
+# ----------------------------------------------------------------------------
+# Global configuration (previously command-line arguments via argparse)
+# ----------------------------------------------------------------------------
+DATA_DIR = 'txt/train_data.pkl'
+VOCAB_FILE = 'data/txt/vocab.json'
+CHECKPOINT_PATH = 'checkpoints/deepsc-Rayleigh'
+CHANNEL = 'Rayleigh'
+MAX_LENGTH = 30
+MIN_LENGTH = 4
+D_MODEL = 128
+DFF = 512
+NUM_LAYERS = 4
+NUM_HEADS = 8
+BATCH_SIZE = 64
+EPOCHS = 2
+BERT_CONFIG_PATH = 'bert/cased_L-12_H-768_A-12/bert_config.json'
+BERT_CHECKPOINT_PATH = 'bert/cased_L-12_H-768_A-12/bert_model.ckpt'
+BERT_DICT_PATH = 'bert/cased_L-12_H-768_A-12/vocab.txt'
+
+SNR = [0, 3, 6, 9, 12, 15, 18]
+
+device = torch.device("cpu")
+
 # Load tokenizer and model fine-tuned on MNLI
 model_name = "roberta-large-mnli"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForSequenceClassification.from_pretrained(model_name)
 model.eval()
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--data-dir', default='txt/train_data.pkl', type=str)
-parser.add_argument('--vocab-file', default='txt/vocab.json', type=str)
-parser.add_argument('--checkpoint-path', default='checkpoints/deepsc-Rayleigh', type=str)
-parser.add_argument('--channel', default='Rayleigh', type=str)
-parser.add_argument('--MAX-LENGTH', default=30, type=int)
-parser.add_argument('--MIN-LENGTH', default=4, type=int)
-parser.add_argument('--d-model', default=128, type = int)
-parser.add_argument('--dff', default=512, type=int)
-parser.add_argument('--num-layers', default=4, type=int)
-parser.add_argument('--num-heads', default=8, type=int)
-parser.add_argument('--batch-size', default=64, type=int)
-parser.add_argument('--epochs', default=2, type = int)
-parser.add_argument('--bert-config-path', default='bert/cased_L-12_H-768_A-12/bert_config.json', type = str)
-parser.add_argument('--bert-checkpoint-path', default='bert/cased_L-12_H-768_A-12/bert_model.ckpt', type = str)
-parser.add_argument('--bert-dict-path', default='bert/cased_L-12_H-768_A-12/vocab.txt', type = str)
 
-device = torch.device("cpu")
-
-
-def performance(args, SNR, net):
+def performance(snr_list, net):
     bleu_score_1gram = BleuScore(1, 0, 0, 0)
 
     test_eur = EurDataset('test')
-    test_iterator = DataLoader(test_eur, batch_size=args.batch_size, num_workers=0,
+    test_iterator = DataLoader(test_eur, batch_size=BATCH_SIZE, num_workers=0,
                                pin_memory=True, collate_fn=collate_data)
 
     StoT = SeqtoText(token_to_idx, end_idx)
     score = []
+    nli_score = []
     score2 = []
     net.eval()
     with torch.no_grad():
-        for epoch in range(args.epochs):
-            Tx_word = []
-            Rx_word = []
+        for epoch in range(EPOCHS):
+            received = []
+            transmitted = []
 
-            for snr in tqdm(SNR):
+            for snr in tqdm(snr_list):
                 word = []
                 target_word = []
                 noise_std = SNR_to_noise(snr)
 
-                for batch_idx, sents in enumerate(test_iterator):
-                    if batch_idx % 10000 != 0:
+                # iterator returns a batch with mutiple sentences
+                for batch_idx, batch in enumerate(test_iterator):
+                    if batch_idx % 100000 != 0:
                         continue
 
-                    sents = sents.to(device)
-                    target = sents
+                    batch = batch.to(device)
+                    target = batch
 
-                    out = greedy_decode(net, sents, noise_std, args.MAX_LENGTH, pad_idx,
-                                        start_idx, args.channel)
+                    out = greedy_decode(net, batch, noise_std, MAX_LENGTH, pad_idx,
+                                        start_idx, CHANNEL)
 
                     sentences = out.cpu().numpy().tolist()
                     result_string = list(map(StoT.sequence_to_text, sentences))
@@ -85,32 +83,31 @@ def performance(args, SNR, net):
                     result_string = list(map(StoT.sequence_to_text, target_sent))
                     target_word = target_word + result_string
 
-                Tx_word.append(word)
-                Rx_word.append(target_word)
-                
-                print(f"_______________current snr is: {snr}_______________")
-                for i in range(len(word)):
+                received.append(word)
+                transmitted.append(target_word)
 
-                    print("Transmitted: " + target_word[i])
-                    print("Received: " + word[i])
+                # print(f"_______________current snr is: {snr}_______________")
+                # for i in range(len(word)):
+                    # print("Transmitted: " + target_word[i])
+                    # print("Received: " + word[i])
 
-                    inputs = tokenizer(target_word[i], word[i], return_tensors="pt", truncation=True)
+                    # inputs = tokenizer(target_word[i], word[i], return_tensors="pt", truncation=True)
 
-                    with torch.no_grad():
-                        logits = model(**inputs).logits
+                    # with torch.no_grad():
+                    #     logits = model(**inputs).logits
 
-                    probs = torch.softmax(logits, dim=-1)
+                    # probs = torch.softmax(logits, dim=-1)
+                    # probs = np.array(probs)
+                    # probs = np.mean(probs, axis=1)
 
-                    labels = ["contradiction", "neutral", "entailment"]
-                    pred_idx = probs.argmax(dim=-1).item()
+                    # labels = ["contradiction", "neutral", "entailment"]
+                    # pred_idx = probs.argmax(dim=-1).item()
 
-                    print(f"Prediction: {labels[pred_idx]}")
-                    print({labels[i]: round(probs[0][i].item(), 4) for i in range(len(labels))})
+                    # print(f"Prediction: {labels[pred_idx]}")
+                    # print({labels[i]: round(probs[0][i].item(), 4) for i in range(len(labels))})
 
             bleu_score = []
-            sim_score = []
-            for sent1, sent2 in zip(Tx_word, Rx_word):
-                # 1-gram
+            for sent1, sent2 in zip(received, transmitted):
                 bleu_score.append(bleu_score_1gram.compute_blue_score(sent1, sent2)) # 7*num_sent
             bleu_score = np.array(bleu_score)
             bleu_score = np.mean(bleu_score, axis=1)
@@ -118,14 +115,11 @@ def performance(args, SNR, net):
 
     score1 = np.mean(np.array(score), axis=0)
 
-    return score1#, score2
+    return score1
+
 
 if __name__ == '__main__':
-    args = parser.parse_args()
-    SNR = [0,3,6,9,12,15,18]
-
-    args.vocab_file = 'data/' + args.vocab_file
-    vocab = json.load(open(args.vocab_file, 'rb'))
+    vocab = json.load(open(VOCAB_FILE, 'rb'))
     token_to_idx = vocab['token_to_idx']
     idx_to_token = dict(zip(token_to_idx.values(), token_to_idx.keys()))
     num_vocab = len(token_to_idx)
@@ -134,16 +128,16 @@ if __name__ == '__main__':
     end_idx = token_to_idx["<END>"]
 
     """ define optimizer and loss function """
-    deepsc = DeepSC(args.num_layers, num_vocab, num_vocab,
-                        num_vocab, num_vocab, args.d_model, args.num_heads,
-                        args.dff, 0.1).to(device)
+    deepsc = DeepSC(NUM_LAYERS, num_vocab, num_vocab,
+                        num_vocab, num_vocab, D_MODEL, NUM_HEADS,
+                        DFF, 0.1).to(device)
 
-
-    checkpoint = torch.load("checkpoints/deepsc-Rayleigh/checkpoint_80_europarl.pth" , map_location=torch.device('cpu'))
+    checkpoint = torch.load("checkpoints/deepsc-Rayleigh/checkpoint_80_europarl.pth", map_location=device)
     deepsc.load_state_dict(checkpoint)
     print('model load!')
 
-    bleu_score = performance(args, SNR, deepsc)
+    bleu_score = performance(SNR, deepsc)
+    print("Bleu scores for this epoch are: ")
     print(bleu_score)
 
     #similarity.compute_similarity(sent1, real)
