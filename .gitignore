@@ -1,7 +1,7 @@
-/__pycache__/*
-/models/__pycache__/*
+__pycache__/*
+models/__pycache__/*
 
 # virtual enviornment
-/.env/*
-/.idea/*
-
+.env/*
+.idea/*
+.venv/*
