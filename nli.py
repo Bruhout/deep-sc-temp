@@ -18,6 +18,14 @@ from tqdm import tqdm
 from sklearn.preprocessing import normalize
 from w3lib.html import remove_tags
 
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+# Load tokenizer and model fine-tuned on MNLI
+model_name = "roberta-large-mnli"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSequenceClassification.from_pretrained(model_name)
+model.eval()
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--data-dir', default='txt/train_data.pkl', type=str)
 parser.add_argument('--vocab-file', default='txt/vocab.json', type=str)
@@ -82,8 +90,22 @@ def performance(args, SNR, net):
                 
                 print(f"_______________current snr is: {snr}_______________")
                 for i in range(len(word)):
+
                     print("Transmitted: " + target_word[i])
                     print("Received: " + word[i])
+
+                    inputs = tokenizer(target_word[i], word[i], return_tensors="pt", truncation=True)
+
+                    with torch.no_grad():
+                        logits = model(**inputs).logits
+
+                    probs = torch.softmax(logits, dim=-1)
+
+                    labels = ["contradiction", "neutral", "entailment"]
+                    pred_idx = probs.argmax(dim=-1).item()
+
+                    print(f"Prediction: {labels[pred_idx]}")
+                    print({labels[i]: round(probs[0][i].item(), 4) for i in range(len(labels))})
 
             bleu_score = []
             sim_score = []
