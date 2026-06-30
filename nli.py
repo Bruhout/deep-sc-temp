@@ -22,8 +22,8 @@ D_MODEL = 128
 DFF = 512
 NUM_LAYERS = 4
 NUM_HEADS = 8
-BATCH_SIZE = 256
-NLI_BATCH_SIZE = 256
+BATCH_SIZE = 512
+NLI_BATCH_SIZE = 512
 EPOCHS = 2
 BERT_CONFIG_PATH = 'bert/cased_L-12_H-768_A-12/bert_config.json'
 BERT_CHECKPOINT_PATH = 'bert/cased_L-12_H-768_A-12/bert_model.ckpt'
@@ -31,8 +31,8 @@ BERT_DICT_PATH = 'bert/cased_L-12_H-768_A-12/vocab.txt'
 ACCEL = "cuda:0"
 # ACCEL = "cpu"
 
-# snr_list = [0, 3, 6, 9, 12, 15, 18]
-snr_list = [0, 6, 12, 18]
+snr_list = [0, 3, 6, 9, 12, 15, 18]
+# snr_list = [0, 6, 12, 18]
 
 
 device = torch.device(ACCEL)
@@ -71,8 +71,8 @@ def performance(snr_list, net):
 
                 # batch is a set of 64 sentences, each tokenized into a list between 4-30 tokens
                 for batch_idx, batch in enumerate(test_iterator):
-                    if batch_idx % 100000 != 0:
-                        continue
+                    # if batch_idx % 100000 != 0:
+                        # continue
 
                     batch = batch.to(device)
                     target = batch
@@ -94,7 +94,7 @@ def performance(snr_list, net):
             
             bleu_score = []
             nli_score = []
-            for r, t in zip(received_final, transmitted_final):
+            for r, t in tqdm(zip(received_final, transmitted_final)):
                 nli_buffer = []
                 for i in range(0, len(r), NLI_BATCH_SIZE):
                     batch1 = r[i:i + NLI_BATCH_SIZE]
