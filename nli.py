@@ -12,9 +12,6 @@ from w3lib.html import remove_tags
 
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-# ----------------------------------------------------------------------------
-# Global configuration (previously command-line arguments via argparse)
-# ----------------------------------------------------------------------------
 DATA_DIR = 'txt/train_data.pkl'
 VOCAB_FILE = 'data/txt/vocab.json'
 CHECKPOINT_PATH = 'checkpoints/deepsc-Rayleigh'
@@ -30,10 +27,12 @@ EPOCHS = 2
 BERT_CONFIG_PATH = 'bert/cased_L-12_H-768_A-12/bert_config.json'
 BERT_CHECKPOINT_PATH = 'bert/cased_L-12_H-768_A-12/bert_model.ckpt'
 BERT_DICT_PATH = 'bert/cased_L-12_H-768_A-12/vocab.txt'
+ACCEL = "cpu"
 
 SNR = [0, 3, 6, 9, 12, 15, 18]
 
-device = torch.device("cpu")
+
+device = torch.device(ACCEL)
 
 # Load tokenizer and model fine-tuned on MNLI
 model_name = "roberta-large-mnli"
@@ -60,8 +59,8 @@ def performance(snr_list, net):
             transmitted = []
 
             for snr in tqdm(snr_list):
-                word = []
-                target_word = []
+                decoded_to_str = []
+                target_sent_str = []
                 noise_std = SNR_to_noise(snr)
 
                 # iterator returns a batch with mutiple sentences
@@ -75,23 +74,23 @@ def performance(snr_list, net):
                     out = greedy_decode(net, batch, noise_std, MAX_LENGTH, pad_idx,
                                         start_idx, CHANNEL)
 
-                    sentences = out.cpu().numpy().tolist()
-                    result_string = list(map(StoT.sequence_to_text, sentences))
-                    word = word + result_string
+                    sentences_tok = out.cpu().numpy().tolist()
+                    sentences_str = list(map(StoT.sequence_to_text, sentences_tok))
+                    decoded_to_str = decoded_to_str + sentences_str
 
                     target_sent = target.cpu().numpy().tolist()
-                    result_string = list(map(StoT.sequence_to_text, target_sent))
-                    target_word = target_word + result_string
+                    sentences_str = list(map(StoT.sequence_to_text, target_sent))
+                    target_sent_str = target_sent_str + sentences_str
 
-                received.append(word)
-                transmitted.append(target_word)
+                received.append(decoded_to_str)
+                transmitted.append(target_sent_str)
 
                 # print(f"_______________current snr is: {snr}_______________")
-                # for i in range(len(word)):
-                    # print("Transmitted: " + target_word[i])
-                    # print("Received: " + word[i])
+                # for i in range(len(decoded_to_str)):
+                    # print("Transmitted: " + target_sent_str[i])
+                    # print("Received: " + decoded_to_str[i])
 
-                    # inputs = tokenizer(target_word[i], word[i], return_tensors="pt", truncation=True)
+                    # inputs = tokenizer(target_sent_str[i], decoded_to_str[i], return_tensors="pt", truncation=True)
 
                     # with torch.no_grad():
                     #     logits = model(**inputs).logits
