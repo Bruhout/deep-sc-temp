@@ -29,16 +29,16 @@ BERT_CHECKPOINT_PATH = 'bert/cased_L-12_H-768_A-12/bert_model.ckpt'
 BERT_DICT_PATH = 'bert/cased_L-12_H-768_A-12/vocab.txt'
 ACCEL = "cpu"
 
-SNR = [0, 3, 6, 9, 12, 15, 18]
+snr_list = [0, 3, 6, 9, 12, 15, 18]
 
 
 device = torch.device(ACCEL)
 
 # Load tokenizer and model fine-tuned on MNLI
-model_name = "roberta-large-mnli"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForSequenceClassification.from_pretrained(model_name)
-model.eval()
+# model_name = "roberta-large-mnli"
+# tokenizer = AutoTokenizer.from_pretrained(model_name)
+# model = AutoModelForSequenceClassification.from_pretrained(model_name)
+# model.eval()
 
 
 def performance(snr_list, net):
@@ -51,21 +51,22 @@ def performance(snr_list, net):
     StoT = SeqtoText(token_to_idx, end_idx)
     score = []
     nli_score = []
-    score2 = []
     net.eval()
     with torch.no_grad():
         for epoch in range(EPOCHS):
-            received = []
-            transmitted = []
+            # 2 dimensional arrays, each final entry is a sentence in string form.
+            # Each row contains the sentence set for a single SNR value
+            received_final = []
+            transmitted_final = []
 
             for snr in tqdm(snr_list):
-                decoded_to_str = []
-                target_sent_str = []
+                dec_sen_collector = []
+                og_sen_collector = []
                 noise_std = SNR_to_noise(snr)
 
-                # iterator returns a batch with mutiple sentences
+                # batch is a set of 64 sentences, each tokenized into a list between 4-30 tokens
                 for batch_idx, batch in enumerate(test_iterator):
-                    if batch_idx % 100000 != 0:
+                    if batch_idx % 10000 != 0:
                         continue
 
                     batch = batch.to(device)
@@ -74,39 +75,40 @@ def performance(snr_list, net):
                     out = greedy_decode(net, batch, noise_std, MAX_LENGTH, pad_idx,
                                         start_idx, CHANNEL)
 
-                    sentences_tok = out.cpu().numpy().tolist()
-                    sentences_str = list(map(StoT.sequence_to_text, sentences_tok))
-                    decoded_to_str = decoded_to_str + sentences_str
+                    sentences = out.cpu().numpy().tolist()
+                    result_string = list(map(StoT.sequence_to_text, sentences))
+                    dec_sen_collector = dec_sen_collector + result_string
 
                     target_sent = target.cpu().numpy().tolist()
-                    sentences_str = list(map(StoT.sequence_to_text, target_sent))
-                    target_sent_str = target_sent_str + sentences_str
+                    result_string = list(map(StoT.sequence_to_text, target_sent))
+                    og_sen_collector = og_sen_collector + result_string
 
-                received.append(decoded_to_str)
-                transmitted.append(target_sent_str)
-
+                received_final.append(dec_sen_collector)
+                transmitted_final.append(og_sen_collector)
+                
                 # print(f"_______________current snr is: {snr}_______________")
-                # for i in range(len(decoded_to_str)):
-                    # print("Transmitted: " + target_sent_str[i])
-                    # print("Received: " + decoded_to_str[i])
+                # for i in range(len(dec_sen_collector)):
 
-                    # inputs = tokenizer(target_sent_str[i], decoded_to_str[i], return_tensors="pt", truncation=True)
+                #     print("Transmitted: " + og_sen_collector[i])
+                #     print("Received: " + dec_sen_collector[i])
 
-                    # with torch.no_grad():
-                    #     logits = model(**inputs).logits
+                #     inputs = tokenizer(og_sen_collector[i], dec_sen_collector[i], return_tensors="pt", truncation=True)
 
-                    # probs = torch.softmax(logits, dim=-1)
-                    # probs = np.array(probs)
-                    # probs = np.mean(probs, axis=1)
+                #     with torch.no_grad():
+                #         logits = model(**inputs).logits
 
-                    # labels = ["contradiction", "neutral", "entailment"]
-                    # pred_idx = probs.argmax(dim=-1).item()
+                #     probs = torch.softmax(logits, dim=-1)
 
-                    # print(f"Prediction: {labels[pred_idx]}")
-                    # print({labels[i]: round(probs[0][i].item(), 4) for i in range(len(labels))})
+                #     labels = ["contradiction", "neutral", "entailment"]
+                #     pred_idx = probs.argmax(dim=-1).item()
+
+                #     print(f"Prediction: {labels[pred_idx]}")
+                #     print({labels[i]: round(probs[0][i].item(), 4) for i in range(len(labels))})
 
             bleu_score = []
-            for sent1, sent2 in zip(received, transmitted):
+            sim_score = []
+            for sent1, sent2 in zip(received_final, transmitted_final):
+                # 1-gram
                 bleu_score.append(bleu_score_1gram.compute_blue_score(sent1, sent2)) # 7*num_sent
             bleu_score = np.array(bleu_score)
             bleu_score = np.mean(bleu_score, axis=1)
@@ -135,7 +137,7 @@ if __name__ == '__main__':
     deepsc.load_state_dict(checkpoint)
     print('model load!')
 
-    bleu_score = performance(SNR, deepsc)
+    bleu_score = performance(snr_list, deepsc)
     print("Bleu scores for this epoch are: ")
     print(bleu_score)
 
