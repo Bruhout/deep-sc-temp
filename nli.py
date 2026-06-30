@@ -22,12 +22,12 @@ D_MODEL = 128
 DFF = 512
 NUM_LAYERS = 4
 NUM_HEADS = 8
-BATCH_SIZE = 64
+BATCH_SIZE = 256
 EPOCHS = 2
 BERT_CONFIG_PATH = 'bert/cased_L-12_H-768_A-12/bert_config.json'
 BERT_CHECKPOINT_PATH = 'bert/cased_L-12_H-768_A-12/bert_model.ckpt'
 BERT_DICT_PATH = 'bert/cased_L-12_H-768_A-12/vocab.txt'
-ACCEL = "cpu"
+ACCEL = "cuda:0"
 
 snr_list = [0, 3, 6, 9, 12, 15, 18]
 
@@ -35,10 +35,10 @@ snr_list = [0, 3, 6, 9, 12, 15, 18]
 device = torch.device(ACCEL)
 
 # Load tokenizer and model fine-tuned on MNLI
-# model_name = "roberta-large-mnli"
-# tokenizer = AutoTokenizer.from_pretrained(model_name)
-# model = AutoModelForSequenceClassification.from_pretrained(model_name)
-# model.eval()
+model_name = "roberta-large-mnli"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSequenceClassification.from_pretrained(model_name)
+model.eval()
 
 
 def performance(snr_list, net):
@@ -49,8 +49,8 @@ def performance(snr_list, net):
                                pin_memory=True, collate_fn=collate_data)
 
     StoT = SeqtoText(token_to_idx, end_idx)
-    score = []
-    nli_score = []
+    bleu_score_final = []
+    nli_score_final = []
     net.eval()
     with torch.no_grad():
         for epoch in range(EPOCHS):
@@ -60,13 +60,14 @@ def performance(snr_list, net):
             transmitted_final = []
 
             for snr in tqdm(snr_list):
+                print(f"_______________current snr is: {snr}_______________")
                 dec_sen_collector = []
                 og_sen_collector = []
                 noise_std = SNR_to_noise(snr)
 
                 # batch is a set of 64 sentences, each tokenized into a list between 4-30 tokens
                 for batch_idx, batch in enumerate(test_iterator):
-                    if batch_idx % 10000 != 0:
+                    if batch_idx % 100 != 0:
                         continue
 
                     batch = batch.to(device)
@@ -85,38 +86,34 @@ def performance(snr_list, net):
 
                 received_final.append(dec_sen_collector)
                 transmitted_final.append(og_sen_collector)
-                
-                # print(f"_______________current snr is: {snr}_______________")
-                # for i in range(len(dec_sen_collector)):
-
-                #     print("Transmitted: " + og_sen_collector[i])
-                #     print("Received: " + dec_sen_collector[i])
-
-                #     inputs = tokenizer(og_sen_collector[i], dec_sen_collector[i], return_tensors="pt", truncation=True)
-
-                #     with torch.no_grad():
-                #         logits = model(**inputs).logits
-
-                #     probs = torch.softmax(logits, dim=-1)
-
-                #     labels = ["contradiction", "neutral", "entailment"]
-                #     pred_idx = probs.argmax(dim=-1).item()
-
-                #     print(f"Prediction: {labels[pred_idx]}")
-                #     print({labels[i]: round(probs[0][i].item(), 4) for i in range(len(labels))})
-
+            
+            
             bleu_score = []
-            sim_score = []
-            for sent1, sent2 in zip(received_final, transmitted_final):
+            nli_score = []
+            for r, t in zip(received_final, transmitted_final):
+                nli_buffer = []
+                NLI_BATCH_SIZE = 256
+                for i in range(0, len(r), NLI_BATCH_SIZE):
+                    batch1 = r[i:i + NLI_BATCH_SIZE]
+                    batch2 = t[i:i + NLI_BATCH_SIZE]
+                    inputs = tokenizer(batch1, batch2, return_tensors="pt",
+                                        truncation=True, padding=True)
+                    with torch.no_grad():
+                        logits = model(**inputs).logits
+                    probs = torch.softmax(logits, dim=-1)
+                    nli_buffer.append(probs.cpu().numpy())
+                nli_buffer = np.concatenate(nli_buffer, axis=0)
+                nli_score.append(nli_buffer)
+                
                 # 1-gram
-                bleu_score.append(bleu_score_1gram.compute_blue_score(sent1, sent2)) # 7*num_sent
+                bleu_score.append(bleu_score_1gram.compute_blue_score(r, t)) # 7*num_sent
             bleu_score = np.array(bleu_score)
             bleu_score = np.mean(bleu_score, axis=1)
-            score.append(bleu_score)
+            bleu_score_final.append(bleu_score)
 
-    score1 = np.mean(np.array(score), axis=0)
+    bleu_score_final = np.mean(np.array(bleu_score_final), axis=0)
 
-    return score1
+    return bleu_score_final, nli_score
 
 
 if __name__ == '__main__':
@@ -137,8 +134,9 @@ if __name__ == '__main__':
     deepsc.load_state_dict(checkpoint)
     print('model load!')
 
-    bleu_score = performance(snr_list, deepsc)
-    print("Bleu scores for this epoch are: ")
+    bleu_score, nli_score = performance(snr_list, deepsc)
+    print("Bleu scores: ")
     print(bleu_score)
 
-    #similarity.compute_similarity(sent1, real)
+    print("NLI scores: ")
+    print(nli_score)
