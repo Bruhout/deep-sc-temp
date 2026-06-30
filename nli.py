@@ -23,13 +23,16 @@ DFF = 512
 NUM_LAYERS = 4
 NUM_HEADS = 8
 BATCH_SIZE = 256
+NLI_BATCH_SIZE = 256
 EPOCHS = 2
 BERT_CONFIG_PATH = 'bert/cased_L-12_H-768_A-12/bert_config.json'
 BERT_CHECKPOINT_PATH = 'bert/cased_L-12_H-768_A-12/bert_model.ckpt'
 BERT_DICT_PATH = 'bert/cased_L-12_H-768_A-12/vocab.txt'
 ACCEL = "cuda:0"
+# ACCEL = "cpu"
 
-snr_list = [0, 3, 6, 9, 12, 15, 18]
+# snr_list = [0, 3, 6, 9, 12, 15, 18]
+snr_list = [0, 6, 12, 18]
 
 
 device = torch.device(ACCEL)
@@ -39,10 +42,10 @@ model_name = "roberta-large-mnli"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForSequenceClassification.from_pretrained(model_name)
 model.eval()
-
+model.to(device)
 
 def performance(snr_list, net):
-    bleu_score_1gram = BleuScore(1, 0, 0, 0)
+    bleu_comp = BleuScore(1, 0, 0, 0)
 
     test_eur = EurDataset('test')
     test_iterator = DataLoader(test_eur, batch_size=BATCH_SIZE, num_workers=0,
@@ -60,6 +63,7 @@ def performance(snr_list, net):
             transmitted_final = []
 
             for snr in tqdm(snr_list):
+                print()
                 print(f"_______________current snr is: {snr}_______________")
                 dec_sen_collector = []
                 og_sen_collector = []
@@ -67,7 +71,7 @@ def performance(snr_list, net):
 
                 # batch is a set of 64 sentences, each tokenized into a list between 4-30 tokens
                 for batch_idx, batch in enumerate(test_iterator):
-                    if batch_idx % 100 != 0:
+                    if batch_idx % 100000 != 0:
                         continue
 
                     batch = batch.to(device)
@@ -92,31 +96,33 @@ def performance(snr_list, net):
             nli_score = []
             for r, t in zip(received_final, transmitted_final):
                 nli_buffer = []
-                NLI_BATCH_SIZE = 256
                 for i in range(0, len(r), NLI_BATCH_SIZE):
                     batch1 = r[i:i + NLI_BATCH_SIZE]
                     batch2 = t[i:i + NLI_BATCH_SIZE]
                     inputs = tokenizer(batch1, batch2, return_tensors="pt",
                                         truncation=True, padding=True)
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
                     with torch.no_grad():
                         logits = model(**inputs).logits
+                    print(i)
                     probs = torch.softmax(logits, dim=-1)
                     nli_buffer.append(probs.cpu().numpy())
                 nli_buffer = np.concatenate(nli_buffer, axis=0)
                 nli_score.append(nli_buffer)
                 
                 # 1-gram
-                bleu_score.append(bleu_score_1gram.compute_blue_score(r, t)) # 7*num_sent
+                bleu_score.append(bleu_comp.compute_blue_score(r, t)) # 7*num_sent
+                
             bleu_score = np.array(bleu_score)
             bleu_score = np.mean(bleu_score, axis=1)
             bleu_score_final.append(bleu_score)
 
     bleu_score_final = np.mean(np.array(bleu_score_final), axis=0)
+    nli_score_final = np.mean(np.array(nli_score_final), axis=0)
 
-    return bleu_score_final, nli_score
+    return bleu_score_final, nli_score_final
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     vocab = json.load(open(VOCAB_FILE, 'rb'))
     token_to_idx = vocab['token_to_idx']
     idx_to_token = dict(zip(token_to_idx.values(), token_to_idx.keys()))
