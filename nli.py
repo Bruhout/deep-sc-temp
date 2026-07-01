@@ -5,7 +5,7 @@ import numpy as np
 from dataset import EurDataset, collate_data
 from models.transceiver import DeepSC
 from torch.utils.data import DataLoader
-from utils import BleuScore, SNR_to_noise, greedy_decode, SeqtoText
+from utils import SNR_to_noise, greedy_decode, SeqtoText
 from tqdm import tqdm
 from sklearn.preprocessing import normalize
 from w3lib.html import remove_tags
@@ -22,9 +22,9 @@ D_MODEL = 128
 DFF = 512
 NUM_LAYERS = 4
 NUM_HEADS = 8
-BATCH_SIZE = 1024
-NLI_BATCH_SIZE = 1024
-EPOCHS = 1
+BATCH_SIZE = 64
+NLI_BATCH_SIZE = 512
+EPOCHS = 2
 BERT_CONFIG_PATH = 'bert/cased_L-12_H-768_A-12/bert_config.json'
 BERT_CHECKPOINT_PATH = 'bert/cased_L-12_H-768_A-12/bert_model.ckpt'
 BERT_DICT_PATH = 'bert/cased_L-12_H-768_A-12/vocab.txt'
@@ -45,14 +45,11 @@ model.eval()
 model.to(device)
 
 def performance(snr_list, net):
-    bleu_comp = BleuScore(1, 0, 0, 0)
-
     test_eur = EurDataset('test')
     test_iterator = DataLoader(test_eur, batch_size=BATCH_SIZE, num_workers=0,
                                pin_memory=True, collate_fn=collate_data)
 
     StoT = SeqtoText(token_to_idx, end_idx)
-    bleu_final = []
     nli_final = []
     net.eval()
     with torch.no_grad():
@@ -95,7 +92,6 @@ def performance(snr_list, net):
                 transmitted_final.append(og_sen_collector)
             
             
-            bleu_epoch = []
             nli_epoch = []
             for r, t in zip(received_final, transmitted_final):
                 nli_snr = []
@@ -113,20 +109,12 @@ def performance(snr_list, net):
                 nli_snr = np.concatenate(nli_snr, axis=0)
                 nli_epoch.append(nli_snr)
                 
-                # 1-gram
-                bleu_epoch.append(bleu_comp.compute_blue_score(r, t)) # 7*num_sent
-                
             nli_final.append(nli_epoch)
 
-            bleu_epoch = np.array(bleu_epoch)
-            bleu_epoch = np.mean(bleu_epoch, axis=1)
-            bleu_final.append(bleu_epoch)
-
-    bleu_final = np.mean(np.array(bleu_final), axis=0)
     nli_final = np.mean(np.array(nli_final), axis=0)
     nli_final = np.mean(np.array(nli_final), axis=1)
 
-    return bleu_final, nli_final
+    return nli_final
 
 if __name__ == "__main__":
     vocab = json.load(open(VOCAB_FILE, 'rb'))
@@ -146,9 +134,7 @@ if __name__ == "__main__":
     deepsc.load_state_dict(checkpoint)
     print('model load!')
 
-    bleu_epoch, nli_epoch = performance(snr_list, deepsc)
-    print("Bleu scores: ")
-    print(bleu_epoch)
+    nli_score = performance(snr_list, deepsc)
 
     print("NLI scores: ")
-    print(nli_epoch)
+    print(nli_score)
