@@ -174,16 +174,8 @@ if __name__ == '__main__':
                         num_vocab, num_vocab, args.d_model, args.num_heads,
                         args.dff, 0.1).to(device)
 
-    model_paths = []
-    for fn in os.listdir(args.checkpoint_path):
-        if not fn.endswith('.pth'): continue
-        idx = int(os.path.splitext(fn)[0].split('_')[-1])  # read the idx of image
-        model_paths.append((os.path.join(args.checkpoint_path, fn), idx))
 
-    model_paths.sort(key=lambda x: x[1])  # sort the image by the idx
-
-    model_path, _ = model_paths[-1]
-    checkpoint = torch.load(model_path)
+    checkpoint = torch.load("/content/checkpoints/deepsc-Rayleigh/checkpoint_80_europarl.pth")
     deepsc.load_state_dict(checkpoint)
     print('model load!')
 
