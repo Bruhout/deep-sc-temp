@@ -16,9 +16,8 @@ from torch.utils.data import DataLoader
 from utils import BleuScore, SNR_to_noise, greedy_decode, SeqtoText
 from tqdm import tqdm
 from sklearn.preprocessing import normalize
-from bert4keras.backend import keras
-from bert4keras.models import build_bert_model
-from bert4keras.tokenizers import Tokenizer
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 from w3lib.html import remove_tags
 
 parser = argparse.ArgumentParser()
@@ -43,61 +42,24 @@ device = torch.device("cuda:0")
 
 # using pre-trained model to compute the sentence similarity
 class Similarity():
-    def __init__(self, config_path, checkpoint_path, dict_path):
-        self.model1 = build_bert_model(config_path, checkpoint_path, with_pool=True)
-        self.model = keras.Model(inputs=self.model1.input,
-                                 outputs=self.model1.get_layer('Encoder-11-FeedForward-Norm').output)
-        # build tokenizer
-        self.tokenizer = Tokenizer(dict_path, do_lower_case=True)
+    def __init__(self):
+        self.model = SentenceTransformer('bert-base-nli-mean-tokens')
 
     def compute_similarity(self, real, predicted):
-        token_ids1, segment_ids1 = [], []
-        token_ids2, segment_ids2 = [], []
-        score = []
+        # Strip any html tags like the original did
+        real      = [remove_tags(s) for s in real]
+        predicted = [remove_tags(s) for s in predicted]
 
-        for (sent1, sent2) in zip(real, predicted):
-            sent1 = remove_tags(sent1)
-            sent2 = remove_tags(sent2)
+        vec1 = self.model.encode(real,      convert_to_numpy=True)
+        vec2 = self.model.encode(predicted, convert_to_numpy=True)
 
-            ids1, sids1 = self.tokenizer.encode(sent1)
-            ids2, sids2 = self.tokenizer.encode(sent2)
-
-            token_ids1.append(ids1)
-            token_ids2.append(ids2)
-            segment_ids1.append(sids1)
-            segment_ids2.append(sids2)
-
-        token_ids1 = keras.preprocessing.sequence.pad_sequences(token_ids1, maxlen=32, padding='post')
-        token_ids2 = keras.preprocessing.sequence.pad_sequences(token_ids2, maxlen=32, padding='post')
-
-        segment_ids1 = keras.preprocessing.sequence.pad_sequences(segment_ids1, maxlen=32, padding='post')
-        segment_ids2 = keras.preprocessing.sequence.pad_sequences(segment_ids2, maxlen=32, padding='post')
-
-        vector1 = self.model.predict([token_ids1, segment_ids1])
-        vector2 = self.model.predict([token_ids2, segment_ids2])
-
-        vector1 = np.sum(vector1, axis=1)
-        vector2 = np.sum(vector2, axis=1)
-
-        vector1 = normalize(vector1, axis=0, norm='max')
-        vector2 = normalize(vector2, axis=0, norm='max')
-
-        dot = np.diag(np.matmul(vector1, vector2.T))  # a*b
-        a = np.diag(np.matmul(vector1, vector1.T))  # a*a
-        b = np.diag(np.matmul(vector2, vector2.T))
-
-        a = np.sqrt(a)
-        b = np.sqrt(b)
-
-        output = dot / (a * b)
-        score = output.tolist()
-
-        return score
+        # Diagonal gives paired cosine similarity: real[i] vs predicted[i]
+        scores = cosine_similarity(vec1, vec2)
+        return np.diag(scores).tolist()
 
 
 def performance(args, SNR, net):
-    similarity = Similarity(args.bert_config_path, args.bert_checkpoint_path, args.bert_dict_path)
-    bleu_score_1gram = BleuScore(1, 0, 0, 0)
+    similarity = Similarity()
 
     test_eur = EurDataset('test')
     test_iterator = DataLoader(test_eur, batch_size=args.batch_size, num_workers=0,
@@ -117,8 +79,10 @@ def performance(args, SNR, net):
                 target_word = []
                 noise_std = SNR_to_noise(snr)
 
-                for sents in test_iterator:
-
+                for batch_idx, sents in enumerate(test_iterator):
+                    if (batch_idx % 10 != 0):
+                        continue
+                    
                     sents = sents.to(device)
                     # src = batch.src.transpose(0, 1)[:1]
                     target = sents
@@ -137,24 +101,17 @@ def performance(args, SNR, net):
                 Tx_word.append(word)
                 Rx_word.append(target_word)
 
-            bleu_score = []
             sim_score = []
-            for sent1, sent2 in zip(Tx_word, Rx_word):
-                # 1-gram
-                bleu_score.append(bleu_score_1gram.compute_blue_score(sent1, sent2)) # 7*num_sent
+            for i , (sent1, sent2) in enumerate(zip(Tx_word, Rx_word)):
+                print(i)
                 sim_score.append(similarity.compute_similarity(sent1, sent2)) # 7*num_sent
-            bleu_score = np.array(bleu_score)
-            bleu_score = np.mean(bleu_score, axis=1)
-            score.append(bleu_score)
-
             sim_score = np.array(sim_score)
             sim_score = np.mean(sim_score, axis=1)
             score2.append(sim_score)
 
-    score1 = np.mean(np.array(score), axis=0)
     score2 = np.mean(np.array(score2), axis=0)
 
-    return score1, score2
+    return score2
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -178,9 +135,7 @@ if __name__ == '__main__':
     deepsc.load_state_dict(checkpoint)
     print('model load!')
 
-    bleu_score, bert_score = performance(args, SNR, deepsc)
-    print("bleu_score:")
-    print(bleu_score)
+    bert_score = performance(args, SNR, deepsc)
     
     print("bert_score:")
     print(bert_score)
